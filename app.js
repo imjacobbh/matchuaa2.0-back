@@ -48,13 +48,15 @@ const connection = require('./database/db');
 
 //10 - Método para la REGISTRACIÓN
 app.post('/register', async (req, res) => {
+    console.log(req.body)
     const user = req.body.user;
     const pass = req.body.pass;
     const date = req.body.date;
     const email = req.body.email;
+    const carrera = req.body.carreraF; 
     let passwordHash = await bcrypt.hash(pass, 8);
 
-    connection.query('INSERT INTO user SET ?', { username: user, birthdate: date, email: email, password: passwordHash }, async (error, results) => {
+    connection.query('INSERT INTO user SET ?', { username: user, birthdate: date, email: email, carrera: carrera,password: passwordHash }, async (error, results) => {
         if (error) {
             console.log(error);
             if (error.code = "ER_DUP_ENTRY") {
@@ -157,14 +159,14 @@ app.use(bodyparser.json());
 // EndPoint Obtener info de un usuario
 app.get('/user/:id', (req, res) => {
     let gID = req.params.id;
-    let query = `select u.id, DATE_FORMAT(birthdate,'%m/%d/%Y') as birthdate, u.created_at, u.description, u.zodiac_sign, u.username, u.email, u.location, u.id_sexual_orientation, u.gender, u.show_me, u.user_type from user u where u.id = ${gID}`;
+    let query = `select u.id, DATE_FORMAT(birthdate,'%m/%d/%Y') as birthdate, u.created_at, u.description, u.carrera, u.zodiac_sign, u.username, u.email, u.location, u.id_sexual_orientation, u.gender, u.show_me, u.user_type from user u where u.id = ${gID}`;
     connection.query(query, (err, user) => {
         if (err) {
             console.log(err, 'errs');
         }
         if (user.length > 0) {
             console.log(user)
-            query = `select id, name from interest inner join user_interest on interest.id = user_interest.id_interest AND user_interest.id_user =${gID}`;
+            query = `select id, name from interest inner join user_interest on interest.id = user_interest.id_interest AND user_interest.id_user =${gID} order by interest.semester`;
             connection.query(query, (err, interest) => {
                 if (!err) {
                     query = `select * from photo where id_user = ${gID}`
@@ -390,13 +392,13 @@ app.put('/changeinteraction/:id', (req, res) => {
         if (result.length == 0) {
 
             if (newStatus == 1 && isuser1) {
-                auxstat = 1;
+                auxstat = 1; //liked by user 1
             } else if (newStatus == 1 && !isuser1) {
-                auxstat = 4;
+                auxstat = 3; //liked by user 2
             } else if (newStatus == 2 && isuser1) {
-                auxstat = 2;
+                auxstat = 2; //rejected by user 1
             } else {
-                auxstat = 5;
+                auxstat = 4;// rejected by user 2
             }
             query = `insert into interaction (id_user1,id_user2,idStatus) values ('${user1}', '${user2}','${auxstat}')`;
             connection.query(query, (error, resultt) => {
@@ -411,9 +413,10 @@ app.put('/changeinteraction/:id', (req, res) => {
             })
 
         } else {
+            //checar si es user1 y status 
             let interactionn = result[0].idStatus;
             console.log(interactionn, "interactiooon")
-            if ((interactionn == 1 || interactionn == 4) && newStatus == 1) {
+            if ((interactionn == 1 && !isuser1 || interactionn == 3 && isuser1) && newStatus == 1) {
                 query = `REPLACE into interaction (id_user1, id_user2,idStatus) values ('${user1}', '${user2}','7');`;
                 let query2 = `insert into mydb.match (idInteraction) value (${result[0].idInteraction});`;
                 connection.query(query, (err, ress) => {
@@ -438,11 +441,21 @@ app.put('/changeinteraction/:id', (req, res) => {
 
 
             } else {
-                query = `delete from interaction where id_user1 = ${user1} and id_user2=${user2}`
-                res.status(200).send({
-                    message: 'data updated',
-                    match: false
+                //TODO:checar que hacer cuando los dos se rechazan
+                
+                query = `REPLACE into interaction (id_user1, id_user2,idStatus) values ('${user1}', '${user2}','5');`
+                connection.query(query, (err, ress) => {
+                    if (error) {
+                        console.log(err);
+                    } else {
+
+                        res.status(200).send({
+                            message: 'data updated',
+                            match: false
+                        })
+                    }
                 })
+                
             }
         }
     })
@@ -457,23 +470,24 @@ app.get('/possible_match/:userId', (req, res) => {
     console.log("posible match searchiiing")
     let userId = req.params.userId;
     //info usuario
-    let query = `select show_me from user where id = ${userId}`;
+    let query = `select show_me, id_sexual_orientation from user where id = ${userId}`;
 
     connection.query(query, (err, user) => {
         if (!err) {
             let show_me = user[0]?.show_me ?? 0;
+            let role = user[0]?.id_sexual_orientation;
             let users = [];
             if (show_me == 2)
-                query = `select id from user where id NOT IN (select id_user1 from interaction where (id_user1 = ${userId} or id_user2 = ${userId} ))  AND id NOT IN (select id_user2 from interaction where id_user1 = ${userId} or id_user2 = ${userId} ) and id != ${userId} limit 1`;
+                query = `select id from user where id NOT IN (select id_user1 from interaction where (id_user1 = ${userId} or id_user2 = ${userId} ))  AND id NOT IN (select id_user2 from interaction where id_user1 = ${userId} or id_user2 = ${userId} ) and id != ${userId} and id_sexual_orientation != ${role} limit 1`;
             else
-                query = `select id from user where id NOT IN (select id_user1 from interaction where (id_user1 = ${userId} or id_user2 = ${userId}))  AND id NOT IN (select id_user2 from interaction where (id_user1 = ${userId} or id_user2 = ${userId})) and gender = ${show_me} and id != ${userId} limit 1 `;
+                query = `select id from user where id NOT IN (select id_user1 from interaction where (id_user1 = ${userId} or id_user2 = ${userId}))  AND id NOT IN (select id_user2 from interaction where (id_user1 = ${userId} or id_user2 = ${userId})) and gender = ${show_me}  and id_sexual_orientation != ${role} and id != ${userId} limit 1 `;
 
             connection.query(query, (err, oneUser) => {
                 if (err)
                     console.log(err)
                 else if (oneUser.length > 0) {
                     console.log("one userrrrrr", oneUser[0])
-                    query = `select u.id, DATE_FORMAT(birthdate,'%m/%d/%Y') as birthdate, u.created_at, u.description, u.zodiac_sign, u.username, u.email, u.location, u.id_sexual_orientation from user u where u.id = ${oneUser[0].id}`;
+                    query = `select u.id, DATE_FORMAT(birthdate,'%m/%d/%Y') as birthdate, u.created_at, u.description, u.carrera, u.zodiac_sign, u.username, u.email, u.location, u.id_sexual_orientation from user u where u.id = ${oneUser[0].id}`;
 
                     connection.query(query, (err, user) => {
                         if (err) {
@@ -516,13 +530,15 @@ app.get('/possible_match/:userId', (req, res) => {
                                     user_kk = null
                                 }
                                 else {
-                                    if (ress[i].id_user1 == userId && !(ress[i].idStatus == 1 || ress[i].idStatus == 2) && ress[i].idStatus != 7) {
+                                    if (ress[i].id_user1 == userId && !(ress[i].idStatus == 1 || ress[i].idStatus == 2) && ress[i].idStatus != 7 && ress[i].idStatus != 5)  {
                                         user_kk = ress[i].id_user2;
+                                        console.log("es user 1")
                                         break
                                     }
                                     else {
-                                        if (ress[i].id_user2 == userId && !(ress[i].idStatus == 4 || ress[i].idStatus == 5) && ress[i].idStatus != 7) {
+                                        if (ress[i].id_user2 == userId && !(ress[i].idStatus == 3 || ress[i].idStatus == 4) && ress[i].idStatus != 7 && ress[i].idStatus != 5) {
                                             user_kk = ress[i].id_user1
+                                            console.log("es user 2")
                                             break 
                                         }
                                     }
@@ -580,8 +596,9 @@ app.get('/possible_match/:userId', (req, res) => {
 });
 
 //Mostrar lista de intereses
-app.get('/interests', (req, res) => {
-    let query = `select * from interest`;
+app.get('/interests/:carrera', (req, res) => {
+    let carreraId = req.params.carrera;
+    let query = `select * from interest where carreraId = ${carreraId} order by semester`;
     connection.query(query, (err, interest) => {
         if (err) {
             console.log(err, 'errs');
